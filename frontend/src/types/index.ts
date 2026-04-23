@@ -1,19 +1,18 @@
 export interface User {
   id: number;
   email: string;
-  role: 'super_admin' | 'franchisee' | 'manager';
+  role: string;
   name: string;
-  franchisee_id?: number;
+  franchisee_id: number | null;
 }
 
 export interface Franchisee {
   id: number;
   name: string;
   user_id: number;
-  user_name: string;
-  email: string;
+  user_name?: string;
+  email?: string;
   created_by: number;
-  created_at: string;
 }
 
 export interface Pizzeria {
@@ -21,8 +20,11 @@ export interface Pizzeria {
   name: string;
   address: string;
   franchisee_id: number;
-  franchisee_name: string;
-  created_at: string;
+  franchisee_name?: string;
+}
+
+export interface Manager extends User {
+  franchisee_id: number;
 }
 
 export interface Employee {
@@ -30,18 +32,31 @@ export interface Employee {
   name: string;
   position: string;
   pizzeria_id: number;
-  pizzeria_name: string;
-  franchisee_name: string;
+  pizzeria_name?: string;
+  franchisee_name?: string;
   med_book_expiry: string;
+  created_by: number;
+}
+
+export interface MedicalTest {
+  id: number;
+  name: string;
+  periodicity_days: number;
+  franchisee_id: number;
   created_by: number;
   created_at: string;
 }
 
-export interface Manager {
+export interface EmployeeMedicalTest {
   id: number;
-  name: string;
-  email: string;
-  franchisee_id: number;
+  employee_id: number;
+  employee_name?: string;
+  medical_test_id: number;
+  test_name?: string;
+  periodicity_days?: number;
+  expiry_date: string;
+  created_by: number;
+  created_at: string;
 }
 
 export interface Stats {
@@ -50,5 +65,3 @@ export interface Stats {
   healthAlerts: number;
   avgStaffing: number;
 }
-
-export type MedBookStatus = 'valid' | 'expiring' | 'expired';

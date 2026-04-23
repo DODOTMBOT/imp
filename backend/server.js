@@ -419,6 +419,123 @@ app.get('/stats', authenticateToken, (req, res) => {
   });
 });
 
+
+// ============= MEDICAL TESTS (Templates) =============
+
+app.get('/medical-tests', authenticateToken, (req, res) => {
+  let query = 'SELECT * FROM medical_tests';
+  
+  if (req.user.role === 'franchisee') {
+    query += ' WHERE franchisee_id = ?';
+    const tests = db.prepare(query).all(req.user.franchisee_id);
+    return res.json(tests);
+  }
+  
+  if (req.user.role === 'manager') {
+    const pizzerias = db.prepare(`
+      SELECT DISTINCT p.franchisee_id 
+      FROM pizzerias p
+      JOIN pizzeria_managers pm ON p.id = pm.pizzeria_id
+      WHERE pm.manager_id = ?
+    `).all(req.user.id);
+    
+    if (pizzerias.length > 0) {
+      const franchiseeId = pizzerias[0].franchisee_id;
+      const tests = db.prepare('SELECT * FROM medical_tests WHERE franchisee_id = ?').all(franchiseeId);
+      return res.json(tests);
+    }
+    return res.json([]);
+  }
+  
+  const tests = db.prepare(query).all();
+  res.json(tests);
+});
+
+app.post('/medical-tests', authenticateToken, (req, res) => {
+  const { name, periodicity_days, franchisee_id } = req.body;
+  
+  const result = db.prepare(
+    'INSERT INTO medical_tests (name, periodicity_days, franchisee_id, created_by) VALUES (?, ?, ?, ?)'
+  ).run(name, periodicity_days, franchisee_id, req.user.id);
+  
+  res.json({ id: result.lastInsertRowid });
+});
+
+app.put('/medical-tests/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  const { name, periodicity_days } = req.body;
+  
+  db.prepare('UPDATE medical_tests SET name = ?, periodicity_days = ? WHERE id = ?')
+    .run(name, periodicity_days, id);
+  
+  res.json({ success: true });
+});
+
+app.delete('/medical-tests/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  db.prepare('DELETE FROM employee_medical_tests WHERE medical_test_id = ?').run(id);
+  db.prepare('DELETE FROM medical_tests WHERE id = ?').run(id);
+  res.json({ success: true });
+});
+
+// ============= EMPLOYEE MEDICAL TESTS =============
+
+app.get('/employee-medical-tests', authenticateToken, (req, res) => {
+  const { employee_id } = req.query;
+  
+  let query = `
+    SELECT emt.*, mt.name as test_name, mt.periodicity_days, e.name as employee_name
+    FROM employee_medical_tests emt
+    JOIN medical_tests mt ON emt.medical_test_id = mt.id
+    JOIN employees e ON emt.employee_id = e.id
+  `;
+  
+  if (employee_id) {
+    query += ' WHERE emt.employee_id = ?';
+    const tests = db.prepare(query).all(employee_id);
+    return res.json(tests);
+  }
+  
+  if (req.user.role === 'franchisee') {
+    query += ` WHERE e.pizzeria_id IN (
+      SELECT id FROM pizzerias WHERE franchisee_id = ?
+    )`;
+    const tests = db.prepare(query).all(req.user.franchisee_id);
+    return res.json(tests);
+  }
+  
+  if (req.user.role === 'manager') {
+    query += ` WHERE e.pizzeria_id IN (
+      SELECT pizzeria_id FROM pizzeria_managers WHERE manager_id = ?
+    )`;
+    const tests = db.prepare(query).all(req.user.id);
+    return res.json(tests);
+  }
+  
+  const tests = db.prepare(query).all();
+  res.json(tests);
+});
+
+app.post('/employee-medical-tests/bulk', authenticateToken, (req, res) => {
+  const { employee_id, tests } = req.body;
+  
+  const stmt = db.prepare(
+    'INSERT INTO employee_medical_tests (employee_id, medical_test_id, expiry_date, created_by) VALUES (?, ?, ?, ?)'
+  );
+  
+  tests.forEach(test => {
+    stmt.run(employee_id, test.medical_test_id, test.expiry_date, req.user.id);
+  });
+  
+  res.json({ success: true });
+});
+
+app.delete('/employee-medical-tests/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+  db.prepare('DELETE FROM employee_medical_tests WHERE id = ?').run(id);
+  res.json({ success: true });
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
 });

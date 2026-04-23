@@ -15,6 +15,7 @@ export function Sidebar() {
     { name: 'Медкнижки', path: '/health', icon: Activity },
     { name: 'Укомплектованность', path: '/staffing', icon: UserCheck },
     { name: 'Метрики', path: '/metrics', icon: TrendingUp },
+    ...(user?.role === 'super_admin' || user?.role === 'franchisee' ? [{ name: 'Настройки', path: '/settings', icon: Shield }] : []),
   ];
 
   const getRoleLabel = (role: string) => {

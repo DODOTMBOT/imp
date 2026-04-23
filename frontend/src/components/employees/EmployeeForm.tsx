@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePizzerias } from '../../hooks/usePizzerias';
 import type { Employee } from '../../types';
@@ -21,11 +21,29 @@ export function EmployeeForm({ employee, onSubmit, onCancel }: EmployeeFormProps
   
   const [name, setName] = useState(employee?.name || '');
   const [position, setPosition] = useState(employee?.position || '');
-  const [pizzeriaId, setPizzeriaId] = useState(employee?.pizzeria_id || pizzerias[0]?.id || 0);
+  const [pizzeriaId, setPizzeriaId] = useState(employee?.pizzeria_id || 0);
   const [medBookExpiry, setMedBookExpiry] = useState(employee?.med_book_expiry || '');
+
+  const availablePizzerias = pizzerias.filter(p => {
+    if (user?.role === 'super_admin') return true;
+    if (user?.role === 'franchisee') return p.franchisee_id === user.franchisee_id;
+    return true;
+  });
+
+  // Устанавливаем первую пиццерию по умолчанию
+  useEffect(() => {
+    if (!employee && availablePizzerias.length > 0 && pizzeriaId === 0) {
+      setPizzeriaId(availablePizzerias[0].id);
+    }
+  }, [availablePizzerias, employee, pizzeriaId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (pizzeriaId === 0) {
+      alert('Выберите пиццерию');
+      return;
+    }
     
     await onSubmit({
       name,
@@ -36,11 +54,19 @@ export function EmployeeForm({ employee, onSubmit, onCancel }: EmployeeFormProps
     });
   };
 
-  const availablePizzerias = pizzerias.filter(p => {
-    if (user?.role === 'super_admin') return true;
-    if (user?.role === 'franchisee') return p.franchisee_id === user.franchisee_id;
-    return true;
-  });
+  if (availablePizzerias.length === 0) {
+    return (
+      <div className="p-6 text-center text-neutral-500">
+        <p>Нет доступных пиццерий</p>
+        <button
+          onClick={onCancel}
+          className="mt-4 px-4 py-2 border border-neutral-300 rounded-lg hover:bg-neutral-50"
+        >
+          Закрыть
+        </button>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">

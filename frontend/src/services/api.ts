@@ -4,7 +4,6 @@ const api = axios.create({
   baseURL: 'http://localhost:3000',
 });
 
-// Автоматически добавляем токен из localStorage
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -58,6 +57,23 @@ export const employeeApi = {
     api.put(`/employees/${id}`, data),
   delete: (id: number) =>
     api.delete(`/employees/${id}`),
+};
+
+export const medicalTestApi = {
+  getAll: () => api.get('/medical-tests'),
+  create: (data: { name: string; periodicity_days: number; franchisee_id: number }) =>
+    api.post('/medical-tests', data),
+  update: (id: number, data: { name: string; periodicity_days: number }) =>
+    api.put(`/medical-tests/${id}`, data),
+  delete: (id: number) => api.delete(`/medical-tests/${id}`),
+};
+
+export const employeeMedicalTestApi = {
+  getAll: (employeeId?: number) =>
+    api.get('/employee-medical-tests', { params: employeeId ? { employee_id: employeeId } : {} }),
+  createBulk: (data: { employee_id: number; tests: { medical_test_id: number; expiry_date: string }[] }) =>
+    api.post('/employee-medical-tests/bulk', data),
+  delete: (id: number) => api.delete(`/employee-medical-tests/${id}`),
 };
 
 export const statsApi = {

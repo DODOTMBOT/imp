@@ -8,6 +8,7 @@ import { Employees } from './pages/Employees';
 import { HealthCompliance } from './pages/HealthCompliance';
 import { Staffing } from './pages/Staffing';
 import { Metrics } from './pages/Metrics';
+import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 
 function ProtectedLayout() {
@@ -37,6 +38,7 @@ function ProtectedLayout() {
           <Route path="/health" element={<HealthCompliance />} />
           <Route path="/staffing" element={<Staffing />} />
           <Route path="/metrics" element={<Metrics />} />
+          {user.role === 'super_admin' || user.role === 'franchisee' ? <Route path="/settings" element={<Settings />} /> : null}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
