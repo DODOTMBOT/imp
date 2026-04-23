@@ -8,19 +8,19 @@ export function Sidebar() {
   const { stats } = useStats();
 
   const navigation = [
-    { name: 'Overview', path: '/', icon: Home },
-    ...(user?.role === 'super_admin' ? [{ name: 'Admin Panel', path: '/admin', icon: Shield }] : []),
-    { name: 'Locations', path: '/locations', icon: MapPin },
-    { name: 'Employees', path: '/employees', icon: Users },
-    { name: 'Health Compliance', path: '/health', icon: Activity },
-    { name: 'Staffing', path: '/staffing', icon: UserCheck },
-    { name: 'Weekly Metrics', path: '/metrics', icon: TrendingUp },
+    { name: 'Обзор', path: '/', icon: Home },
+    ...(user?.role === 'super_admin' ? [{ name: 'Администрирование', path: '/admin', icon: Shield }] : []),
+    { name: 'Локации', path: '/locations', icon: MapPin },
+    { name: 'Сотрудники', path: '/employees', icon: Users },
+    { name: 'Медкнижки', path: '/health', icon: Activity },
+    { name: 'Укомплектованность', path: '/staffing', icon: UserCheck },
+    { name: 'Метрики', path: '/metrics', icon: TrendingUp },
   ];
 
   const getRoleLabel = (role: string) => {
-    if (role === 'super_admin') return 'Super Admin';
-    if (role === 'franchisee') return 'Franchisee';
-    if (role === 'manager') return 'Manager';
+    if (role === 'super_admin') return 'Супер Администратор';
+    if (role === 'franchisee') return 'Франчайзи';
+    if (role === 'manager') return 'Управляющий';
     return role;
   };
 
@@ -28,7 +28,7 @@ export function Sidebar() {
     <div className="w-64 bg-white border-r border-neutral-200 flex flex-col">
       <div className="p-6 border-b border-neutral-200">
         <h1 className="text-xl font-bold text-neutral-900">Territory Platform</h1>
-        <p className="text-xs text-neutral-500 mt-1">Management Console</p>
+        <p className="text-xs text-neutral-500 mt-1">Консоль управления</p>
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
