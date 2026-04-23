@@ -4,7 +4,7 @@ import type { Pizzeria } from '../../types';
 interface PizzeriaFormProps {
   pizzeria?: Pizzeria;
   franchiseeId?: number;
-  onSubmit: (data: { name: string; address: string; franchisee_id?: number }) => Promise<void>;
+  onSubmit: (data: { name: string; address: string; franchisee_id: number }) => Promise<void>;
   onCancel: () => void;
 }
 
@@ -14,10 +14,16 @@ export function PizzeriaForm({ pizzeria, franchiseeId, onSubmit, onCancel }: Piz
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!franchiseeId && !pizzeria) {
+      console.error('franchiseeId is required for new pizzerias');
+      return;
+    }
+    
     await onSubmit({
       name,
       address,
-      ...(franchiseeId && { franchisee_id: franchiseeId })
+      franchisee_id: franchiseeId || pizzeria!.franchisee_id
     });
   };
 
