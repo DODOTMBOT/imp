@@ -1,17 +1,38 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const db = new Database('dodo.db');
-const PORT = 3000;
-const JWT_SECRET = 'dodo-pizza-secret-key-change-in-production';
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-dev';
 
-db.pragma('foreign_keys = OFF');
+db.pragma('foreign_keys = ON');
 
-app.use(cors());
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: 'Слишком много запросов, попробуйте позже'
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'Слишком много попыток входа, попробуйте через 15 минут'
+});
+
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+}));
 app.use(express.json());
+app.use(generalLimiter);
 
 // ============= AUTH MIDDLEWARE =============
 
@@ -32,51 +53,67 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+// ============= VALIDATION =============
+
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+  next();
+};
+
 // ============= AUTH ENDPOINTS =============
 
-app.post('/login', (req, res) => {
-  const { email, password } = req.body;
-  
-  const crypto = require('crypto');
-  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-  
-  const user = db.prepare('SELECT * FROM users WHERE email = ? AND password_hash = ?').get(email, passwordHash);
-  
-  if (!user) {
-    return res.status(401).json({ error: 'Неверный email или пароль' });
-  }
-  
-  let franchisee_id = user.franchisee_id;
-  if (user.role === 'franchisee') {
-    const franchisee = db.prepare('SELECT id FROM franchisees WHERE user_id = ?').get(user.id);
-    franchisee_id = franchisee?.id || null;
-  }
-  
-  const token = jwt.sign(
-    { 
-      id: user.id, 
-      email: user.email, 
-      role: user.role, 
-      name: user.name,
-      franchisee_id: franchisee_id
-    }, 
-    JWT_SECRET, 
-    { expiresIn: '24h' }
-  );
-  
-  res.json({ 
-    token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-      franchisee_id: franchisee_id
+app.post('/login',
+  loginLimiter,
+  body('email').isEmail().withMessage('Введите корректный email'),
+  body('password').isLength({ min: 6 }).withMessage('Пароль минимум 6 символов'),
+  handleValidationErrors,
+  async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ error: 'Неверный email или пароль' });
     }
-  });
+
+    let franchisee_id = user.franchisee_id;
+    if (user.role === 'franchisee') {
+      const franchisee = db.prepare('SELECT id FROM franchisees WHERE user_id = ?').get(user.id);
+      franchisee_id = franchisee?.id || null;
+    }
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        franchisee_id: franchisee_id
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        franchisee_id: franchisee_id
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.post('/logout', authenticateToken, (req, res) => {
+app.post('/logout', authenticateToken, (_req, res) => {
   res.json({ success: true });
 });
 
@@ -105,25 +142,34 @@ app.get('/franchisees', authenticateToken, (req, res) => {
   res.json(franchisees);
 });
 
-app.post('/franchisees', authenticateToken, (req, res) => {
-  if (req.user.role !== 'super_admin') {
-    return res.status(403).json({ error: 'Доступ запрещён' });
+app.post('/franchisees',
+  authenticateToken,
+  body('name').isLength({ min: 2 }).withMessage('Название минимум 2 символа'),
+  body('email').isEmail().withMessage('Введите корректный email'),
+  body('password').isLength({ min: 6 }).withMessage('Пароль минимум 6 символов'),
+  handleValidationErrors,
+  async (req, res, next) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
+    const { name, email, password, created_by } = req.body;
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const userResult = db.prepare(
+      'INSERT INTO users (email, password_hash, role, name) VALUES (?, ?, ?, ?)'
+    ).run(email, passwordHash, 'franchisee', name);
+
+    const franchiseeResult = db.prepare(
+      'INSERT INTO franchisees (name, user_id, created_by) VALUES (?, ?, ?)'
+    ).run(name, userResult.lastInsertRowid, created_by);
+
+    res.json({ id: franchiseeResult.lastInsertRowid });
+  } catch (error) {
+    next(error);
   }
-  
-  const { name, email, password, created_by } = req.body;
-  
-  const crypto = require('crypto');
-  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-  
-  const userResult = db.prepare(
-    'INSERT INTO users (email, password_hash, role, name) VALUES (?, ?, ?, ?)'
-  ).run(email, passwordHash, 'franchisee', name);
-  
-  const franchiseeResult = db.prepare(
-    'INSERT INTO franchisees (name, user_id, created_by) VALUES (?, ?, ?)'
-  ).run(name, userResult.lastInsertRowid, created_by);
-  
-  res.json({ id: franchiseeResult.lastInsertRowid });
 });
 
 app.put('/franchisees/:id', authenticateToken, (req, res) => {
@@ -150,6 +196,7 @@ app.delete('/franchisees/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
   const franchisee = db.prepare('SELECT user_id FROM franchisees WHERE id = ?').get(id);
   
+  db.prepare('DELETE FROM employee_medical_tests WHERE employee_id IN (SELECT id FROM employees WHERE pizzeria_id IN (SELECT id FROM pizzerias WHERE franchisee_id = ?))').run(id);
   db.prepare('DELETE FROM employees WHERE pizzeria_id IN (SELECT id FROM pizzerias WHERE franchisee_id = ?)').run(id);
   db.prepare('DELETE FROM pizzeria_managers WHERE pizzeria_id IN (SELECT id FROM pizzerias WHERE franchisee_id = ?)').run(id);
   db.prepare('DELETE FROM pizzerias WHERE franchisee_id = ?').run(id);
@@ -199,7 +246,13 @@ app.get('/pizzerias', authenticateToken, (req, res) => {
   res.json(pizzerias);
 });
 
-app.post('/pizzerias', authenticateToken, (req, res) => {
+app.post('/pizzerias',
+  authenticateToken,
+  body('name').trim().isLength({ min: 2 }).withMessage('Название минимум 2 символа'),
+  body('address').trim().notEmpty().withMessage('Адрес обязателен'),
+  body('franchisee_id').isInt().withMessage('Некорректный franchisee_id'),
+  handleValidationErrors,
+  (req, res) => {
   const { name, address, franchisee_id } = req.body;
   const result = db.prepare(
     'INSERT INTO pizzerias (name, address, franchisee_id) VALUES (?, ?, ?)'
@@ -217,6 +270,15 @@ app.put('/pizzerias/:id', authenticateToken, (req, res) => {
 
 app.delete('/pizzerias/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
+
+  if (req.user.role !== 'super_admin') {
+    const pizzeria = db.prepare('SELECT franchisee_id FROM pizzerias WHERE id = ?').get(id);
+    if (!pizzeria || pizzeria.franchisee_id !== req.user.franchisee_id) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+  }
+
+  db.prepare('DELETE FROM employee_medical_tests WHERE employee_id IN (SELECT id FROM employees WHERE pizzeria_id = ?)').run(id);
   db.prepare('DELETE FROM employees WHERE pizzeria_id = ?').run(id);
   db.prepare('DELETE FROM pizzeria_managers WHERE pizzeria_id = ?').run(id);
   db.prepare('DELETE FROM pizzerias WHERE id = ?').run(id);
@@ -257,22 +319,33 @@ app.get('/managers/:id/pizzerias', authenticateToken, (req, res) => {
   res.json(pizzerias);
 });
 
-app.post('/managers', authenticateToken, (req, res) => {
-  const { name, email, password, franchisee_id, pizzeria_ids } = req.body;
-  
-  const crypto = require('crypto');
-  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-  
-  const result = db.prepare(
-    'INSERT INTO users (email, password_hash, role, name, franchisee_id) VALUES (?, ?, ?, ?, ?)'
-  ).run(email, passwordHash, 'manager', name, franchisee_id);
-  
-  const managerId = result.lastInsertRowid;
-  
-  const linkStmt = db.prepare('INSERT INTO pizzeria_managers (manager_id, pizzeria_id) VALUES (?, ?)');
-  pizzeria_ids.forEach(pid => linkStmt.run(managerId, pid));
-  
-  res.json({ id: managerId });
+app.post('/managers',
+  authenticateToken,
+  body('name').trim().isLength({ min: 2 }).withMessage('Имя минимум 2 символа'),
+  body('email').isEmail().withMessage('Введите корректный email'),
+  body('password').isLength({ min: 6 }).withMessage('Пароль минимум 6 символов'),
+  body('franchisee_id').isInt().withMessage('Некорректный franchisee_id'),
+  body('pizzeria_ids').isArray().withMessage('pizzeria_ids должен быть массивом'),
+  handleValidationErrors,
+  async (req, res, next) => {
+  try {
+    const { name, email, password, franchisee_id, pizzeria_ids } = req.body;
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const result = db.prepare(
+      'INSERT INTO users (email, password_hash, role, name, franchisee_id) VALUES (?, ?, ?, ?, ?)'
+    ).run(email, passwordHash, 'manager', name, franchisee_id);
+
+    const managerId = result.lastInsertRowid;
+
+    const linkStmt = db.prepare('INSERT INTO pizzeria_managers (manager_id, pizzeria_id) VALUES (?, ?)');
+    pizzeria_ids.forEach(pid => linkStmt.run(managerId, pid));
+
+    res.json({ id: managerId });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.put('/managers/:id', authenticateToken, (req, res) => {
@@ -336,7 +409,14 @@ app.get('/employees', authenticateToken, (req, res) => {
   res.json(employees);
 });
 
-app.post('/employees', authenticateToken, (req, res) => {
+app.post('/employees',
+  authenticateToken,
+  body('name').trim().isLength({ min: 2 }).withMessage('Имя минимум 2 символа'),
+  body('position').notEmpty().withMessage('Должность обязательна'),
+  body('pizzeria_id').isInt().withMessage('Некорректный pizzeria_id'),
+  body('med_book_expiry').isDate().withMessage('Некорректная дата'),
+  handleValidationErrors,
+  (req, res) => {
   const { name, position, pizzeria_id, med_book_expiry, created_by } = req.body;
   const result = db.prepare(
     'INSERT INTO employees (name, position, pizzeria_id, med_book_expiry, created_by) VALUES (?, ?, ?, ?, ?)'
@@ -357,6 +437,7 @@ app.put('/employees/:id', authenticateToken, (req, res) => {
 
 app.delete('/employees/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
+  db.prepare('DELETE FROM employee_medical_tests WHERE employee_id = ?').run(id);
   db.prepare('DELETE FROM employees WHERE id = ?').run(id);
   res.json({ success: true });
 });
@@ -392,7 +473,6 @@ app.get('/stats', authenticateToken, (req, res) => {
     employeeCount = db.prepare('SELECT COUNT(*) as count FROM employees').get().count;
   }
   
-  const today = new Date().toISOString().split('T')[0];
   const in30days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
   let healthQuery = `
@@ -491,6 +571,28 @@ app.get('/employee-medical-tests', authenticateToken, (req, res) => {
   `;
   
   if (employee_id) {
+    if (req.user.role !== 'super_admin') {
+      const emp = db.prepare(`
+        SELECT e.pizzeria_id, p.franchisee_id
+        FROM employees e
+        JOIN pizzerias p ON e.pizzeria_id = p.id
+        WHERE e.id = ?
+      `).get(employee_id);
+
+      if (!emp) return res.status(404).json({ error: 'Сотрудник не найден' });
+
+      if (req.user.role === 'franchisee' && emp.franchisee_id !== req.user.franchisee_id) {
+        return res.status(403).json({ error: 'Доступ запрещён' });
+      }
+
+      if (req.user.role === 'manager') {
+        const hasAccess = db.prepare(
+          'SELECT 1 FROM pizzeria_managers WHERE manager_id = ? AND pizzeria_id = ?'
+        ).get(req.user.id, emp.pizzeria_id);
+        if (!hasAccess) return res.status(403).json({ error: 'Доступ запрещён' });
+      }
+    }
+
     query += ' WHERE emt.employee_id = ?';
     const tests = db.prepare(query).all(employee_id);
     return res.json(tests);
@@ -534,6 +636,14 @@ app.delete('/employee-medical-tests/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
   db.prepare('DELETE FROM employee_medical_tests WHERE id = ?').run(id);
   res.json({ success: true });
+});
+
+app.use((err, _req, res, _next) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    error: 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { details: err.message })
+  });
 });
 
 app.listen(PORT, () => {
